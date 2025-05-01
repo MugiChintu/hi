@@ -1,0 +1,823 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spare Parts Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+        }
+        .sidebar {
+            transition: transform 0.3s ease-in-out;
+            border-top-right-radius: 20px;
+            border-bottom-right-radius: 20px;
+        }
+        .sidebar-hidden {
+            transform: translateX(-100%);
+        }
+        .card {
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .summary-card {
+            background: linear-gradient(135deg, #f7f9fc 0%, #e0e7ff 100%);
+        }
+        .equipment-card, .oem-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f0f4f8 100%);
+            height: 160px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .equipment-name, .oem-name {
+            font-size: 1.125rem;
+            font-weight: 500;
+            line-height: 1.2;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+        .status-tag {
+            border-radius: 50px;
+            font-size: 0.75rem;
+            padding: 0.25rem 0.75rem;
+        }
+        .status-pm {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            color: #1e3a8a;
+        }
+        .status-bd {
+            background: linear-gradient(135deg, #ffedd5 0%, #fed7aa 100%);
+            color: #9a3412;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 50;
+        }
+        .modal-content {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            width: 500px;
+            margin: 5% auto;
+            position: relative;
+        }
+        .equipment-section, .oem-section {
+            display: none;
+        }
+        .equipment-section.active, .oem-section.active {
+            display: block;
+        }
+        .summary-section {
+            display: none;
+        }
+        .summary-section.active {
+            display: block;
+        }
+        .progress-bar {
+            background-color: #e5e7eb;
+            border-radius: 10px;
+            height: 10px;
+            width: 100%;
+            position: relative;
+        }
+        .progress-bar-fill {
+            background-color: #a855f7;
+            height: 100%;
+            border-radius: 10px;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .status-circle {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        .status-scheduled {
+            background-color: #3b82f6;
+        }
+        .status-completed {
+            background-color: #10b981;
+        }
+        .nav-item.active {
+            background-color: #4a5568;
+            color: white;
+        }
+    </style>
+</head>
+<body class="flex min-h-screen bg-gray-50">
+    <div id="sidebar" class="sidebar w-64 bg-gray-800 text-white flex flex-col p-6 fixed h-full z-10">
+        <div class="flex items-center mb-10">
+            <h1 class="text-2xl font-semibold">Spare Parts Management</h1>
+            <button id="toggleSidebar" class="ml-auto text-white focus:outline-none">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
+                </svg>
+            </button>
+        </div>
+        <nav>
+            <ul>
+                <li class="mb-6"><a href="#" id="dashboardLink" class="nav-item flex items-center text-gray-300 hover:text-white py-2 px-4 rounded-lg hover:bg-gray-700 active"><svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12h18M3 6h18M3 18h18"></path></svg>Dashboard</a></li>
+                <li class="mb-6"><a href="#" id="oemLink" class="nav-item flex items-center text-gray-300 hover:text-white py-2 px-4 rounded-lg hover:bg-gray-700"><svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m4-8v4m4-4v4"></path></svg>OEM</a></li>
+                <li class="mb-6"><a href="#" id="inventoryLink" class="nav-item flex items-center text-gray-300 hover:text-white py-2 px-4 rounded-full hover:bg-gray-700"><svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>Inventory</a></li>
+            </ul>
+        </nav>
+    </div>
+
+    <div id="mainContent" class="flex-1 ml-64 p-8 transition-all duration-300">
+        <header class="flex justify-between items-center mb-8">
+            <div>
+                <h2 class="text-2xl font-semibold">Dashboard</h2>
+            </div>
+            <div class="flex space-x-3">
+                <button id="openSidebarButton" class="p-2 bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
+                    </svg>
+                </button>
+                <button id="blockAButton" class="px-4 py-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 text-sm font-medium">Block A</button>
+                <button id="blockBButton" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 text-sm font-medium">Block B</button>
+            </div>
+        </header>
+
+        <section id="blockASummary" class="summary-section active mb-8">
+            <h3 class="text-xl font-semibold mb-4">Block A Summary</h3>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div class="card summary-card p-6 text-center">
+                    <h4 class="text-gray-600 text-sm font-medium mb-2">Equipment Count</h4>
+                    <p class="text-3xl font-bold">10</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="blockBSummary" class="summary-section mb-8">
+            <h3 class="text-xl font-semibold mb-4">Block B Summary</h3>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div class="card summary-card p-6 text-center">
+                    <h4 class="text-gray-600 text-sm font-medium mb-2">Equipment Count</h4>
+                    <p class="text-3xl font-bold">14</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="blockASection" class="equipment-section active">
+            <h3 class="text-xl font-semibold mb-4">Block A Equipment</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">SPP 60 L</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('spp60l')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">SPP 300 L</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('spp300l')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Compression</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('compression')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Metal Detector / Deduster</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('metaldetector')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Coating Machine</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('coating')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Capsule Filling</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('capsulefilling')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Capsule Check Weigher</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('capsulecheck')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Rapid Mixer Granulator (RMG)</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('rmg')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Fluid Bed Dryer (FBD)</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('fbd')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Roll Compactor</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('rollcompactor')">View Details</button>
+                </div>
+            </div>
+        </section>
+
+        <section id="blockBSection" class="equipment-section">
+            <h3 class="text-xl font-semibold mb-4">Block B Equipment</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">API Isolator</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('apiisolator')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Column Blender</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('columnblender')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">RMG</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('rmgb')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">FBD</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('fbdb')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Compression</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('compressionb')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Metal Detector / Deduster</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('metaldetectorb')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Capsule Filling</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('capsulefillingb')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Coating-1</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('coating1')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Coating-3</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('coating3')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Coating-4</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('coating4')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Coating-5</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('coating5')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">HPH-1</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('hph1')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">HPH-2</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('hph2')">View Details</button>
+                </div>
+                <div class="card equipment-card p-4">
+                    <h4 class="equipment-name mb-2">Imprinting Machine</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('imprinting')">View Details</button>
+                </div>
+            </div>
+        </section>
+
+        <section id="oemSection" class="oem-section">
+            <h3 class="text-xl font-semibold mb-4">OEM Overview</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">IMA</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('ima')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">IMA Kilian</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('imakilian')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">Tapasya</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('tapasya')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">Vedic Pac/Ayurda</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('vedicpac')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">Alexanderwerk</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('alexanderwerk')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">Glatt</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('glatt')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">Bosch</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('bosch')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">Gansons</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('gansons')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">Pam Coater</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('pamcoater')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">Ackley</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('ackley')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">Sarala</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('sarala')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">PAM GLATT</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('pamglatt')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">CPS</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('cps')">View Details</button>
+                </div>
+                <div class="card oem-card p-4">
+                    <h4 class="oem-name mb-2">GEA</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <span class="status-tag status-pm">PM</span>
+                        <span class="status-tag status-bd">BD</span>
+                    </div>
+                    <button class="text-blue-500 hover:underline text-sm" onclick="openModal('gea')">View Details</button>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div id="equipmentModal" class="modal">
+        <div class="modal-content">
+            <button class="absolute top-2 right-2 text-gray-500 hover:text-gray-700" onclick="closeModal()">×</button>
+            <h3 id="modalTitle" class="text-xl font-semibold mb-4"></h3>
+            <div class="flex mb-4">
+                <div class="w-1/3">
+                    <img id="modalImage" src="https://via.placeholder.com/150" alt="Equipment Image" class="w-full rounded-lg">
+                </div>
+                <div class="w-2/3 pl-4">
+                    <p id="modalDescription" class="text-gray-700 mb-2 text-sm"></p>
+                    <div class="mb-2">
+                        <h4 class="text-sm font-semibold text-gray-600">Maintenance Status</h4>
+                        <div class="flex space-x-4 mt-1">
+                            <div class="flex items-center">
+                                <span class="status-circle status-scheduled mr-1"></span>
+                                <span class="text-sm">Preventive: Scheduled</span>
+                            </div>
+                            <div class="flex items-center">
+                                <span class="status-circle status-completed mr-1"></span>
+                                <span class="text-sm">Breakdown: Completed</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-semibold text-gray-600">Spare Parts</h4>
+                        <div class="flex justify-between mt-1">
+                            <div>
+                                <p class="text-sm">Available: <span id="sparePartsAvailable"></span></p>
+                                <p class="text-sm">Required: <span id="sparePartsRequired"></span></p>
+                            </div>
+                            <div class="w-1/2">
+                                <div class="progress-bar">
+                                    <div id="sparePartsProgress" class="progress-bar-fill"></div>
+                                </div>
+                                <p id="sparePartsPercentage" class="text-right text-xs text-gray-500"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="mb-4">
+                <h4 class="text-sm font-semibold text-gray-600">Maintenance Schedule</h4>
+                <div class="flex justify-between mt-1">
+                    <div class="flex items-center">
+                        <svg class="w-4 h-4 mr-1 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                        </svg>
+                        <p class="text-sm">Last: <span id="lastMaintenance"></span></p>
+                    </div>
+                    <div class="flex items-center">
+                        <svg class="w-4 h-4 mr-1 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <p class="text-sm">Next: <span id="nextMaintenance"></span></p>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <h4 class="text-sm font-semibold text-gray-600 mb-2">Maintenance History</h4>
+                <table class="w-full text-sm text-gray-700">
+                    <thead>
+                        <tr class="border-b">
+                            <th class="text-left py-2 text-sm">Date</th>
+                            <th class="text-left py-2 text-sm">Type</th>
+                            <th class="text-left py-2 text-sm">Description</th>
+                            <th class="text-left py-2 text-sm">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="maintenanceHistory">
+                    </tbody>
+                </table>
+            </div>
+            <div class="flex justify-between mt-4">
+                <button class="px-4 py-2 bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 text-sm" onclick="closeModal()">Close</button>
+                <button class="px-4 py-2 bg-purple-500 text-white rounded-full hover:bg-purple-600 text-sm" onclick="scheduleMaintenance()">Schedule Maintenance</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+            return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+            if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+                try {
+                    var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                    var firstSheetName = workbook.SheetNames[0];
+                    var worksheet = workbook.Sheets[firstSheetName];
+                    var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                    var filteredData = jsonData.filter(row => row.some(filledCell));
+                    var headerRowIndex = filteredData.findIndex((row, index) =>
+                        row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                    );
+                    if (headerRowIndex === -1 || headerRowIndex > 25) {
+                        headerRowIndex = 0;
+                    }
+                    var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex));
+                    csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                    return csv;
+                } catch (e) {
+                    console.error(e);
+                    return "";
+                }
+            }
+            return gk_fileData[filename] || "";
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const toggleSidebar = document.getElementById('toggleSidebar');
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('mainContent');
+            const openSidebarButton = document.getElementById('openSidebarButton');
+            const modal = document.getElementById('equipmentModal');
+            const blockAButton = document.getElementById('blockAButton');
+            const blockBButton = document.getElementById('blockBButton');
+            const blockASection = document.getElementById('blockASection');
+            const blockBSection = document.getElementById('blockBSection');
+            const blockASummary = document.getElementById('blockASummary');
+            const blockBSummary = document.getElementById('blockBSummary');
+            const oemSection = document.getElementById('oemSection');
+            const dashboardLink = document.getElementById('dashboardLink');
+            const oemLink = document.getElementById('oemLink');
+            const inventoryLink = document.getElementById('inventoryLink');
+
+            const toggleSidebarVisibility = () => {
+                sidebar.classList.toggle('sidebar-hidden');
+                mainContent.classList.toggle('ml-64');
+                mainContent.classList.toggle('ml-0');
+                openSidebarButton.style.display = sidebar.classList.contains('sidebar-hidden') ? 'block' : 'none';
+            };
+
+            toggleSidebar.addEventListener('click', toggleSidebarVisibility);
+            openSidebarButton.addEventListener('click', toggleSidebarVisibility);
+
+            blockAButton.addEventListener('click', () => {
+                blockASection.classList.add('active');
+                blockBSection.classList.remove('active');
+                blockASummary.classList.add('active');
+                blockBSummary.classList.remove('active');
+                blockAButton.classList.add('bg-blue-500', 'text-white');
+                blockAButton.classList.remove('bg-gray-200', 'text-gray-700');
+                blockBButton.classList.add('bg-gray-200', 'text-gray-700');
+                blockBButton.classList.remove('bg-blue-500', 'text-white');
+            });
+
+            blockBButton.addEventListener('click', () => {
+                blockBSection.classList.add('active');
+                blockASection.classList.remove('active');
+                blockBSummary.classList.add('active');
+                blockASummary.classList.remove('active');
+                blockBButton.classList.add('bg-blue-500', 'text-white');
+                blockBButton.classList.remove('bg-gray-200', 'text-gray-700');
+                blockAButton.classList.add('bg-gray-200', 'text-gray-700');
+                blockAButton.classList.remove('bg-blue-500', 'text-white');
+            });
+
+            dashboardLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                document.querySelector('h2').textContent = 'Dashboard';
+                blockASection.classList.add('active');
+                blockBSection.classList.remove('active');
+                blockASummary.classList.add('active');
+                blockBSummary.classList.remove('active');
+                oemSection.classList.remove('active');
+                dashboardLink.classList.add('active');
+                oemLink.classList.remove('active');
+                inventoryLink.classList.remove('active');
+                blockAButton.style.display = 'block';
+                blockBButton.style.display = 'block';
+            });
+
+            oemLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                document.querySelector('h2').textContent = 'OEM Overview';
+                oemSection.classList.add('active');
+                blockASection.classList.remove('active');
+                blockBSection.classList.remove('active');
+                blockASummary.classList.remove('active');
+                blockBSummary.classList.remove('active');
+                oemLink.classList.add('active');
+                dashboardLink.classList.remove('active');
+                inventoryLink.classList.remove('active');
+                blockAButton.style.display = 'none';
+                blockBButton.style.display = 'none';
+            });
+
+            inventoryLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                document.querySelector('h2').textContent = 'Inventory';
+                oemSection.classList.remove('active');
+                blockASection.classList.remove('active');
+                blockBSection.classList.remove('active');
+                blockASummary.classList.remove('active');
+                blockBSummary.classList.remove('active');
+                inventoryLink.classList.add('active');
+                dashboardLink.classList.remove('active');
+                oemLink.classList.remove('active');
+                blockAButton.style.display = 'none';
+                blockBButton.style.display = 'none';
+                alert('Inventory section is not implemented yet.');
+            });
+
+            window.openModal = function(equipment) {
+                modal.style.display = 'block';
+                const title = document.getElementById('modalTitle');
+                const image = document.getElementById('modalImage');
+                const description = document.getElementById('modalDescription');
+                const sparePartsAvailable = document.getElementById('sparePartsAvailable');
+                const sparePartsRequired = document.getElementById('sparePartsRequired');
+                const sparePartsProgress = document.getElementById('sparePartsProgress');
+                const sparePartsPercentage = document.getElementById('sparePartsPercentage');
+                const lastMaintenance = document.getElementById('lastMaintenance');
+                const nextMaintenance = document.getElementById('nextMaintenance');
+                const maintenanceHistory = document.getElementById('maintenanceHistory');
+
+                const modalData = {
+                    'spp60l': { title: 'SPP 60 L', image: 'https://ima.it/pharma/wp-content/uploads/sites/2/2016/12/FMIXA03_0108_ROTO-CUBE-300_No-wall_Generale-1.jpg', desc: 'Performs small-scale wet granulation for uniform mixing and granule formation.', available: 8, required: 10, last: '2025-03-15', next: '2025-06-15', history: [['2025-03-15', 'Preventive', 'Regular maintenance check', 'Completed'], ['2025-02-02', 'Breakdown', 'Mixer blade replacement', 'Completed']] },
+                    'spp300l': { title: 'SPP 300 L', image: 'https://ima.it/pharma/wp-content/uploads/sites/2/2016/12/FMIXA03_0108_ROTO-CUBE-300_No-wall_Generale-1.jpg', desc: 'Handles large-scale wet granulation for consistent batch processing.', available: 5, required: 8, last: '2025-03-20', next: '2025-06-20', history: [['2025-03-20', 'Preventive', 'Routine inspection', 'Completed'], ['2025-01-10', 'Breakdown', 'Motor repair', 'Completed']] },
+                    'compression': { title: 'Compression', image: 'https://www.romaco.com/files/website/03_Products/02_Kilian/KTP-420X/img_Products_Teaser-Boxes-Kilian-KTP-420X.png', desc: 'Compresses granules into uniform tablets using punches and dies.', available: 3, required: 5, last: '2025-05-01', next: '2025-08-01', history: [['2025-05-01', 'Preventive', 'Calibration check', 'Completed'], ['2025-02-15', 'Breakdown', 'Punch replacement', 'Completed']] },
+                    'metaldetector': { title: 'Metal Detector / Deduster', image: 'https://www.kraemerag.ch/wp-content/uploads/2018/06/KD6015-500_LOCK-IQ4_small.png', desc: 'Removes metal contaminants and cleans tablets of excess powder post-compression.', available: 3, required: 4, last: '2025-04-10', next: '2025-07-10', history: [['2025-04-10', 'Preventive', 'Sensor calibration', 'Completed'], ['2025-01-20', 'Breakdown', 'Deduster filter replacement', 'Completed']] },
+                    'coating': { title: 'Coating Machine', image: 'https://gansons.com/wp-content/uploads/2022/10/7.png', desc: 'Applies protective and functional coatings to tablets for taste masking and release control.', available: 2, required: 3, last: '2025-04-05', next: '2025-07-05', history: [['2025-04-05', 'Preventive', 'Spray nozzle cleaning', 'Completed'], ['2025-02-10', 'Breakdown', 'Drum motor repair', 'Completed']] },
+                    'capsulefilling': { title: 'Capsule Filling', image: 'https://www.syntegon.com/hs-fs/hubfs/05_website/Content/1-Solutions/1-Pharma/1-Technology-pages/25-GKF-Selection-Series/Syntegon-GKF-702.jpg?width=786&height=406&name=Syntegon-GKF-702.jpg', desc: 'Fills empty hard gelatin capsules with powder or pellets in accurate doses.', available: 4, required: 6, last: '2025-03-25', next: '2025-06-25', history: [['2025-03-25', 'Preventive', 'Filling mechanism check', 'Completed'], ['2025-01-15', 'Breakdown', 'Capsule feeder repair', 'Completed']] },
+                    'capsulecheck': { title: 'Capsule Check Weigher', image: 'https://www.syntegon.com/hs-fs/hubfs/Content/1-Solutions/1-Pharma/1-Technology-pages/28-Checkweighing/check-weighing-machine.jpg?width=580&height=400&name=check-weighing-machine.jpg', desc: 'Ensures each filled capsule meets weight specifications for quality control.', available: 2, required: 3, last: '2025-04-12', next: '2025-07-12', history: [['2025-04-12', 'Preventive', 'Scale calibration', 'Completed'], ['2025-02-05', 'Breakdown', 'Sensor replacement', 'Completed']] },
+                    'rmg': { title: 'Rapid Mixer Granulator (RMG)', image: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTJTom6GNGOReqoxGTRyI7JM3dPkTGUgQYjPg&s', desc: 'Mixes powders and forms wet granules quickly and uniformly.', available: 2, required: 4, last: '2025-04-08', next: '2025-07-08', history: [['2025-04-08', 'Preventive', 'Blade inspection', 'Completed'], ['2025-01-25', 'Breakdown', 'Motor overhaul', 'Completed']] },
+                    'fbd': { title: 'Fluid Bed Dryer (FBD)', image: 'https://www.glatt.com/wp-content/uploads/2021/09/Wirbelschichtanlagen.jpg.webp', desc: 'Dries wet granules using hot air to achieve uniform moisture content.', available: 1, required: 2, last: '2025-03-30', next: '2025-06-30', history: [['2025-03-30', 'Preventive', 'Filter cleaning', 'Completed'], ['2025-01-05', 'Breakdown', 'Heater replacement', 'Completed']] },
+                    'rollcompactor': { title: 'Roll Compactor', image: 'https://www.alexanderwerk.com/files/images/bilder-katalog/alexanderwerk-ag-wp-200-pharma-details-01.jpg', desc: 'Compacts powder into ribbons for dry granulation, then mills into granules.', available: 3, required: 5, last: '2025-05-03', next: '2025-08-03', history: [['2025-05-03', 'Preventive', 'Roll alignment', 'Completed'], ['2025-02-20', 'Breakdown', 'Gearbox repair', 'Completed']] },
+                    'apiisolator': { title: 'API Isolator', image: 'https://www.prosys.com/wp-content/uploads/2024/12/ProTectus_cover_photo-removebg-preview.png', desc: 'Provides containment for handling potent APIs safely and efficiently.', available: 2, required: 3, last: '2025-04-18', next: '2025-07-18', history: [['2025-04-18', 'Preventive', 'Seal inspection', 'Completed'], ['2025-02-10', 'Breakdown', 'Glove replacement', 'Completed']] },
+                    'columnblender': { title: 'Column Blender', image: 'https://image.made-in-china.com/2f0j00pMaGYOdzCycW/Pharma-Single-Column-Bin-Hopper-Blender-Mixer-Machine.webp', desc: 'Uniformly blends powders or granules in a contained, dust-free system.', available: 2, required: 4, last: '2025-04-14', next: '2025-07-14', history: [['2025-04-14', 'Preventive', 'Blender alignment', 'Completed'], ['2025-01-30', 'Breakdown', 'Motor replacement', 'Completed']] },
+                    'rmgb': { title: 'RMG', image: 'https://www.saraleng.com/images/machine/rmg_1.png', desc: 'Mixes and granulates powders for tablet manufacturing.', available: 1, required: 2, last: '2025-04-09', next: '2025-07-09', history: [['2025-04-09', 'Preventive', 'Blade inspection', 'Completed'], ['2025-02-01', 'Breakdown', 'Motor repair', 'Completed']] },
+                    'fbdb': { title: 'FBD', image: 'https://www.glatt.com/wp-content/uploads/2021/09/Wirbelschichtanlagen.jpg.webp', desc: 'Uses fluidized air to dry granules to target moisture levels.', available: 1, required: 2, last: '2025-04-11', next: '2025-07-11', history: [['2025-04-11', 'Preventive', 'Filter cleaning', 'Completed'], ['2025-01-15', 'Breakdown', 'Heater replacement', 'Completed']] },
+                    'compressionb': { title: 'Compression', image: 'https://www.romaco.com/files/website/03_Products/02_Kilian/KTP-420X/img_Products_Teaser-Boxes-Kilian-KTP-420X.png', desc: 'Converts granules into tablets under controlled compression force.', available: 3, required: 5, last: '2025-05-02', next: '2025-08-02', history: [['2025-05-02', 'Preventive', 'Calibration check', 'Completed'], ['2025-02-20', 'Breakdown', 'Punch replacement', 'Completed']] },
+                    'metaldetectorb': { title: 'Metal Detector / Deduster', image: 'https://www.kraemerag.ch/wp-content/uploads/2018/06/KD6015-500_LOCK-IQ4_small.png', desc: 'Detects and removes metals and excess powder from tablets.', available: 2, required: 3, last: '2025-04-13', next: '2025-07-13', history: [['2025-04-13', 'Preventive', 'Sensor calibration', 'Completed'], ['2025-01-25', 'Breakdown', 'Deduster filter replacement', 'Completed']] },
+                    'capsulefillingb': { title: 'Capsule Filling', image: 'https://ppsnordic.com/wp-content/uploads/2022/05/IMA-ZANASI-THC-300x300.jpg', desc: 'Precisely fills capsules with formulation as per batch requirements.', available: 3, required: 5, last: '2025-04-07', next: '2025-07-07', history: [['2025-04-07', 'Preventive', 'Filling mechanism check', 'Completed'], ['2025-01-10', 'Breakdown', 'Capsule feeder repair', 'Completed']] },
+                    'coating1': { title: 'Coating-1', image: 'https://gansons.com/wp-content/uploads/2022/10/7.png', desc: 'Coats tablets in machine #1 for protection and controlled drug release.', available: 3, required: 4, last: '2025-04-16', next: '2025-07-16', history: [['2025-04-16', 'Preventive', 'Spray nozzle cleaning', 'Completed'], ['2025-02-15', 'Breakdown', 'Drum motor repair', 'Completed']] },
+                    'coating3': { title: 'Coating-3', image: 'https://gansons.com/wp-content/uploads/2022/10/7.png', desc: 'Coats tablets in machine #3 with uniform film or sugar layers.', available: 2, required: 3, last: '2025-04-17', next: '2025-07-17', history: [['2025-04-17', 'Preventive', 'Spray nozzle cleaning', 'Completed'], ['2025-02-20', 'Breakdown', 'Drum motor repair', 'Completed']] },
+                    'coating4': { title: 'Coating-4', image: 'https://gansons.com/wp-content/uploads/2022/10/7.png', desc: 'Performs coating operations on tablets in designated line #4.', available: 2, required: 3, last: '2025-04-19', next: '2025-07-19', history: [['2025-04-19', 'Preventive', 'Spray nozzle cleaning', 'Completed'], ['2025-02-25', 'Breakdown', 'Drum motor repair', 'Completed']] },
+                    'coating5': { title: 'Coating-5', image: 'https://gansons.com/wp-content/uploads/2022/10/7.png', desc: 'Applies coatings in machine #5 to enhance tablet functionality and appearance.', available: 1, required: 2, last: '2025-04-20', next: '2025-07-20', history: [['2025-04-20', 'Preventive', 'Spray nozzle cleaning', 'Completed'], ['2025-02-28', 'Breakdown', 'Drum motor repair', 'Completed']] },
+                    'hph1': { title: 'HPH-1', image: 'https://cdn.gea.com/-/media/migratedfromtridion/products/tabletop-pandaplus_w_internal-and-external-use_home-_-personal-care-3895.jpg?h=675&w=1200&hash=15D1CCA7AE14D13F4208020EF5B63F1A', desc: 'Uses high pressure to reduce particle size and create stable emulsions or suspensions.', available: 1, required: 2, last: '2025-04-21', next: '2025-07-21', history: [['2025-04-21', 'Preventive', 'Pressure valve check', 'Completed'], ['2025-03-01', 'Breakdown', 'Pump repair', 'Completed']] },
+                    'hph2': { title: 'HPH-2', image: 'https://cdn.gea.com/-/media/migratedfromtridion/products/tabletop-pandaplus_w_internal-and-external-use_home-_-personal-care-3895.jpg?h=675&w=1200&hash=15D1CCA7AE14D13F4208020EF5B63F1A', desc: 'Second high-pressure homogenizer for emulsification and suspension processing.', available: 1, required: 2, last: '2025-04-22', next: '2025-07-22', history: [['2025-04-22', 'Preventive', 'Pressure valve check', 'Completed'], ['2025-03-02', 'Breakdown', 'Pump repair', 'Completed']] },
+                    'imprinting': { title: 'Imprinting Machine', image: 'https://www.romaco.com/files/website/03_Products/03_Siebler/01_Siebler-SL/img_Products_Teaser-Boxes-Siebler-SL.png', desc: 'Imprints logos or codes onto tablets for identification.', available: 2, required: 3, last: '2025-04-23', next: '2025-07-23', history: [['2025-04-23', 'Preventive', 'Stamp alignment', 'Completed'], ['2025-03-05', 'Breakdown', 'Ink system repair', 'Completed']] },
+                    'ima': { title: 'IMA', image: 'https://ima.it/pharma/wp-content/uploads/sites/2/2023/05/IMA-Active-Logo-Color.png', desc: 'Manufacturer of pharmaceutical processing equipment.', available: 5, required: 6, last: '2025-04-24', next: '2025-07-24', history: [['2025-04-24', 'Preventive', 'Equipment check', 'Completed'], ['2025-03-10', 'Breakdown', 'Part replacement', 'Completed']] },
+                    'imakilian': { title: 'IMA Kilian', image: 'https://www.romaco.com/files/website/03_Products/02_Kilian/KTP-420X/img_Products_Teaser-Boxes-Kilian-KTP-420X.png', desc: 'Specializes in tablet compression technology.', available: 4, required: 5, last: '2025-04-25', next: '2025-07-25', history: [['2025-04-25', 'Preventive', 'Calibration', 'Completed'], ['2025-03-15', 'Breakdown', 'Punch repair', 'Completed']] },
+                    'tapasya': { title: 'Tapasya', image: 'https://www.tapasyaengg.com/wp-content/uploads/2020/12/tapasya-logo.png', desc: 'Provides granulation and drying equipment.', available: 3, required: 4, last: '2025-04-26', next: '2025-07-26', history: [['2025-04-26', 'Preventive', 'Filter check', 'Completed'], ['2025-03-20', 'Breakdown', 'Motor repair', 'Completed']] },
+                    'vedicpac': { title: 'Vedic Pac/Ayurda', image: 'https://www.vediclifesciences.com/wp-content/uploads/2023/01/vedic-logo.png', desc: 'Offers packaging and processing solutions for Ayurveda products.', available: 2, required: 3, last: '2025-04-27', next: '2025-07-27', history: [['2025-04-27', 'Preventive', 'Seal inspection', 'Completed'], ['2025-03-25', 'Breakdown', 'Conveyor repair', 'Completed']] },
+                    'alexanderwerk': { title: 'Alexanderwerk', image: 'https://www.alexanderwerk.com/files/images/bilder-katalog/alexanderwerk-ag-wp-200-pharma-details-01.jpg', desc: 'Known for roll compactors and granulation systems.', available: 3, required: 4, last: '2025-04-28', next: '2025-07-28', history: [['2025-04-28', 'Preventive', 'Roll alignment', 'Completed'], ['2025-03-30', 'Breakdown', 'Gearbox repair', 'Completed']] },
+                    'glatt': { title: 'Glatt', image: 'https://www.glatt.com/wp-content/uploads/2021/09/Wirbelschichtanlagen.jpg.webp', desc: 'Specializes in fluid bed drying and coating technology.', available: 2, required: 3, last: '2025-04-29', next: '2025-07-29', history: [['2025-04-29', 'Preventive', 'Filter cleaning', 'Completed'], ['2025-04-01', 'Breakdown', 'Heater repair', 'Completed']] },
+                    'bosch': { title: 'Bosch', image: 'https://www.boschpackaging.com/fileadmin/_processed_/e/2/csm_Bosch-Packaging-Technology-Logo_0b3e9e8e75.png', desc: 'Provides advanced packaging and processing machines.', available: 4, required: 5, last: '2025-04-30', next: '2025-07-30', history: [['2025-04-30', 'Preventive', 'Sensor check', 'Completed'], ['2025-04-05', 'Breakdown', 'Motor repair', 'Completed']] },
+                    'gansons': { title: 'Gansons', image: 'https://gansons.com/wp-content/uploads/2022/10/7.png', desc: 'Manufactures coating and drying equipment.', available: 2, required: 3, last: '2025-05-01', next: '2025-08-01', history: [['2025-05-01', 'Preventive', 'Nozzle cleaning', 'Completed'], ['2025-04-10', 'Breakdown', 'Drum repair', 'Completed']] },
+                    'pamcoater': { title: 'Pam Coater', image: 'https://www.pamglatt.com/wp-content/uploads/2020/09/pam-glatt-logo.png', desc: 'Specializes in tablet coating systems.', available: 1, required: 2, last: '2025-05-02', next: '2025-08-02', history: [['2025-05-02', 'Preventive', 'Spray check', 'Completed'], ['2025-04-15', 'Breakdown', 'Motor repair', 'Completed']] },
+                    'ackley': { title: 'Ackley', image: 'https://www.ackley.com/wp-content/uploads/2021/03/Ackley-Machine-Corp-Logo.png', desc: 'Offers capsule filling and inspection equipment.', available: 2, required: 3, last: '2025-05-03', next: '2025-08-03', history: [['2025-05-03', 'Preventive', 'Feeder check', 'Completed'], ['2025-04-20', 'Breakdown', 'Sensor repair', 'Completed']] },
+                    'sarala': { title: 'Sarala', image: 'https://www.saraleng.com/images/logo.png', desc: 'Provides granulation and blending solutions.', available: 1, required: 2, last: '2025-05-04', next: '2025-08-04', history: [['2025-05-04', 'Preventive', 'Blade inspection', 'Completed'], ['2025-04-25', 'Breakdown', 'Motor repair', 'Completed']] },
+                    'pamglatt': { title: 'PAM GLATT', image: 'https://www.pamglatt.com/wp-content/uploads/2020/09/pam-glatt-logo.png', desc: 'Combines coating and drying technologies.', available: 2, required: 3, last: '2025-05-05', next: '2025-08-05', history: [['2025-05-05', 'Preventive', 'Filter check', 'Completed'], ['2025-04-30', 'Breakdown', 'Heater repair', 'Completed']] },
+                    'cps': { title: 'CPS', image: 'https://www.cps.com/wp-content/uploads/2020/10/CPS-Logo-2020.png', desc: 'Specializes in packaging and processing equipment.', available: 1, required: 2, last: '2025-05-06', next: '2025-08-06', history: [['2025-05-06', 'Preventive', 'Seal inspection', 'Completed'], ['2025-05-01', 'Breakdown', 'Conveyor repair', 'Completed']] },
+                    'gea': { title: 'GEA', image: 'https://cdn.gea.com/-/media/migratedfromtridion/global/logo/gea-logo.png?h=100&w=300&hash=0BDF2C65D8F47A7E6F8C9C9F8E5E8F8E', desc: 'Offers a range of processing and packaging solutions.', available: 3, required: 4, last: '2025-05-07', next: '2025-08-07', history: [['2025-05-07', 'Preventive', 'Pressure check', 'Completed'], ['2025-05-02', 'Breakdown', 'Pump repair', 'Completed']] }
+                };
+
+                const data = modalData[equipment] || { title: 'Unknown', image: 'https://via.placeholder.com/150', desc: 'No description available.', available: 0, required: 1, last: 'N/A', next: 'N/A', history: [] };
+                title.textContent = data.title;
+                image.src = data.image;
+                description.textContent = data.desc;
+                sparePartsAvailable.textContent = data.available;
+                sparePartsRequired.textContent = data.required;
+                sparePartsProgress.style.width = (data.available / data.required * 100) + '%';
+                sparePartsPercentage.textContent = (data.available / data.required * 100).toFixed(1) + '%';
+                lastMaintenance.textContent = data.last;
+                nextMaintenance.textContent = data.next;
+                maintenanceHistory.innerHTML = data.history.map(row => `<tr class="border-b"><td class="py-2">${row[0]}</td><td class="py-2">${row[1]}</td><td class="py-2">${row[2]}</td><td class="py-2"><span class="status-circle status-completed"></span> ${row[3]}</td></tr>`).join('');
+            };
+
+            window.closeModal = function() {
+                modal.style.display = 'none';
+            };
+
+            window.scheduleMaintenance = function() {
+                alert('Maintenance scheduled for ' + document.getElementById('modalTitle').textContent + ' on ' + new Date().toISOString().split('T')[0]);
+            };
+        });
+    </script>
+</body>
+</html>
