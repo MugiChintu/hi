@@ -1,44 +1,8 @@
 # hi 
-add(
-  add(
-    add(
-      add(
-        add(
-          add(
-            add(
-              add(
-                add(
-                  add(
-                    add(
-                      add(
-                        add(
-                          add(
-                            if(equals(body('Parse_JSON')?['allActionsAddressedAccurately'],'Pass'),1,0),
-                            if(equals(body('Parse_JSON')?['productReturnActionsAndDDsClosedAccurately'],'Pass'),1,0)
-                          ),
-                          if(equals(body('Parse_JSON')?['manufactureDate'],'Pass'),1,0)
-                        ),
-                        if(equals(body('Parse_JSON')?['neededFilesUploaded'],'Pass'),1,0)
-                      ),
-                      if(equals(body('Parse_JSON')?['filesProperlyNamed'],'Pass'),1,0)
-                    ),
-                    if(equals(body('Parse_JSON')?['codingProductAnalysis'],'Pass'),1,0)
-                  ),
-                  if(equals(body('Parse_JSON')?['labellingReview'],'Pass'),1,0)
-                ),
-                if(equals(body('Parse_JSON')?['dhrReview'],'Pass'),1,0)
-              ),
-              if(equals(body('Parse_JSON')?['serviceHistoryReview'],'Pass'),1,0)
-            ),
-            if(equals(body('Parse_JSON')?['riskReview'],'Pass'),1,0)
-          ),
-          if(equals(body('Parse_JSON')?['complaintHistoryReview'],'Pass'),1,0)
-        ),
-        if(equals(body('Parse_JSON')?['capaHistoryReview'],'Pass'),1,0)
-      ),
-      if(equals(body('Parse_JSON')?['qmsCapaNcrRecordInput'],'Pass'),1,0)
-    ),
-    if(equals(body('Parse_JSON')?['escalationDetermination'],'Pass'),1,0)
+mul(
+  div(
+    float(outputs('Calculate_Total_Score')),
+    15
   ),
-  if(equals(body('Parse_JSON')?['investigationSummary'],'Pass'),1,0)
+  100
 )
