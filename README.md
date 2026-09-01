@@ -4,39 +4,65 @@
     "investigationNumber": {
       "type": "string"
     },
-    "reviewer": {
+    "remark": {
       "type": "string"
     },
     "ciName": {
       "type": "string"
     },
-    "totalScore": {
-      "type": "integer"
-    },
-    "totalQuestions": {
-      "type": "integer"
-    },
-    "percentage": {
-      "type": "number"
-    },
-    "result": {
+    "allActionsAddressedAccurately": {
       "type": "string"
     },
-    "answers": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "string"
-      }
+    "productReturnActionsAndDDsClosedAccurately": {
+      "type": "string"
+    },
+    "manufactureDate": {
+      "type": "string"
+    },
+    "neededFilesUploaded": {
+      "type": "string"
+    },
+    "filesProperlyNamed": {
+      "type": "string"
+    },
+    "codingProductAnalysis": {
+      "type": "string"
+    },
+    "labellingReview": {
+      "type": "string"
+    },
+    "dhrReview": {
+      "type": "string"
+    },
+    "serviceHistoryReview": {
+      "type": "string"
+    },
+    "riskReview": {
+      "type": "string"
+    },
+    "complaintHistoryReview": {
+      "type": "string"
+    },
+    "capaHistoryReview": {
+      "type": "string"
+    },
+    "qmsCapaNcrRecordInput": {
+      "type": "string"
+    },
+    "escalationDetermination": {
+      "type": "string"
+    },
+    "investigationSummary": {
+      "type": "string"
+    },
+    "totalScore": {
+      "type": "number"
+    },
+    "totalPercentage": {
+      "type": "number"
+    },
+    "passOrFail": {
+      "type": "string"
     }
-  },
-  "required": [
-    "investigationNumber",
-    "reviewer",
-    "ciName",
-    "totalScore",
-    "totalQuestions",
-    "percentage",
-    "result",
-    "answers"
-  ]
+  }
 }
